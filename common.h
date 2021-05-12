@@ -82,12 +82,23 @@ using json = nlohmann::json;
 //  else tuple->protocol = 6;
 //}
 
+template<int VL>
+uint64_t ludo_hash_size(uint64_t num_keys_vals)
+{
+	// returns the total mem used by ludo as a func of VL, #key-val pairs
+	return (3.76 + 1.05*VL)*num_keys_vals;
+}
+
 inline uint64_t diff_us(timeval t1, timeval t2) {
   return ((t1.tv_sec - t2.tv_sec) * 1000000ULL + (t1.tv_usec - t2.tv_usec));
 }
 
 inline uint64_t diff_ms(timeval t1, timeval t2) {
   return diff_us(t1, t2) / 1000ULL;
+}
+
+inline uint64_t diff_ns_RT(timespec& t1, timespec& t2) {
+  return (t1.tv_sec - t2.tv_sec) * 1000000000ULL + t1.tv_nsec - t2.tv_nsec;
 }
 
 std::string human(uint64_t word);
@@ -365,12 +376,14 @@ public:
 class Clocker {
   int level;
   struct timeval start;
+  struct timespec start_RT;
   string name;
   bool stopped = false;
   
   int laps = 0;
   uint64_t us = 0;
-  
+  uint64_t ns = 0;
+
   TeeOstream &os;
 
 public:
@@ -382,6 +395,7 @@ public:
     this->os << "++";
     
     gettimeofday(&start, nullptr);
+    clock_gettime(CLOCK_REALTIME, &start_RT);
     this->os << " [" << name << "]" << endl;
     
     Counter::counters.emplace_back(this->os);
@@ -389,9 +403,12 @@ public:
   
   void lap() {
     timeval end;
+    struct timespec end_RT;
     gettimeofday(&end, nullptr);
+    clock_gettime(CLOCK_REALTIME, &end_RT);
     us += diff_us(end, start);
-    
+    ns += diff_ns_RT(end_RT, start_RT);
+
     output();
     
     laps++;
@@ -399,6 +416,7 @@ public:
   
   void resume() {
     gettimeofday(&start, nullptr);
+    clock_gettime(CLOCK_REALTIME, &start_RT);
   }
   
   void stop() {
@@ -420,7 +438,7 @@ public:
     for (int i = 0; i < level; ++i) os << "| ";
     os << "--";
     os << " [" << name << "]" << (laps ? "@" + to_string(laps) : "") << ": "
-       << us / 1000 << "ms or " << us << "us"
+       << us / 1000 << "ms or " << us << "us or " << ns << "ns" 
        << endl;
   }
   

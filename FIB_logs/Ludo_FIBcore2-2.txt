@@ -1,0 +1,4 @@
+uniform, 631.187
+Zipfian, 626.123
+uniform, 631.45
+Zipfian, 627.586

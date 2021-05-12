@@ -36,11 +36,14 @@ IF ((CMAKE_BUILD_TYPE MATCHES Release) OR (CMAKE_BUILD_TYPE MATCHES RelWithDebIn
 ENDIF ((CMAKE_BUILD_TYPE MATCHES Release) OR (CMAKE_BUILD_TYPE MATCHES RelWithDebInfo))
 
 #FIND_PACKAGE(Boost 1.65 COMPONENTS REQUIRED)
+#FIND_PACKAGE(jsoncpp COMPONENTS REQUIRED)
 
 include_directories(
         #        ${Boost_INCLUDE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+#include_directories(${JSONCPP_INCLUDE_DIR})
 
 set(COMMON_SOURCE_FILES
         common.cpp
@@ -58,6 +61,7 @@ set(HEADER_FILES
         utils/hashutil.h
         DPH/dph.h
         lfsr64.h
+	fib.h
         disjointset.h
         BloomFilter/bloom_filter.h
         BloomFilter/bloom_flitable.h
@@ -120,9 +124,21 @@ target_link_libraries(validity ${OPENSSL_LIBRARIES})
 target_link_libraries(microbenchmarks ${OPENSSL_LIBRARIES})
 target_link_libraries(sideExperiments ${OPENSSL_LIBRARIES})
 
+add_library(jsoncpp dist/json/json.h dist/json/json-forwards.h dist/jsoncpp.cpp)
+target_link_libraries(microbenchmarks jsoncpp)
+
 #TARGET_LINK_LIBRARIES(dynamic_benchmarks LINK_PUBLIC ${Boost_LIBRARIES})
 #TARGET_LINK_LIBRARIES(validity LINK_PUBLIC ${Boost_LIBRARIES})
 #TARGET_LINK_LIBRARIES(microbenchmarks LINK_PUBLIC ${Boost_LIBRARIES})
 
 #TARGET_LINK_LIBRARIES(validity cmph)
 #TARGET_LINK_LIBRARIES(microbenchmarks cmph)
+
+set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake/")
+find_package(MLPACK REQUIRED)
+
+set(Boost_USE_STATIC_LIBS ON)
+find_package(Boost 1.55 REQUIRED serialization)
+include_directories(${Boost_INCLUDE_DIR})
+
+target_link_libraries(microbenchmarks ${MLPACK_LIBRARY} Boost::serialization)

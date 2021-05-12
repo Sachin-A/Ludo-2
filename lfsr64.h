@@ -36,7 +36,8 @@ public:
   LFSRGen(uint64_t _seed, uint64_t _max, uint64_t _skipCount = 0) {
     maxvalue = _max;
     returnLength = ((sizeof(returnType) + 7) / 8);
-    
+
+	printf("LFSRGen COnstructing: returnType size: %i, returnLen: %i, seed: %i, max: %i, skipct: %i \n", sizeof(returnType), returnLength, _seed, _max, _skipCount);    
     for (int i = 0; i < returnLength || i == 0; i++) {
       reg0[i] = _seed;
       unsigned __int128 sv = _seed;

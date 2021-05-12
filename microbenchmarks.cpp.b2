@@ -15,8 +15,6 @@
 #include <jsoncpp/json/json.h>
 #include <math.h>
 
-
-std::string fname_global = "";
 int version = 12;
 int cores = min(20U, std::thread::hardware_concurrency());
 
@@ -29,7 +27,7 @@ struct OthelloChange {
 };
 
 typedef uint32_t Key;
-const uint32_t lookupCnt = 1<<14; // 1 << 25;
+const uint32_t lookupCnt = 1 << 25;
 
 template<int VL, class Val>
 void testSetSep(vector<Key> &keys, vector<Val> &values, uint64_t nn, vector<Key> &zipfianKeys) {
@@ -362,29 +360,9 @@ void testOthello(vector<Key> &keys, vector<Val> &values, uint64_t nn, vector<Key
   }
 }
 
-void print_arr(std::vector<double>& v, std::string s)
-{
-        std::ofstream logs;
-	logs.open("/home/ubuntu/Ludo/FIB_logs/Ludo_FIB"+fname_global+".txt", std::ios::app);
-
-	std::sort(v.begin(), v.end());
-	uint32_t len = v.size();
-	//cout<<"&&&&& "<<s<<endl;
-	if (len > 0){
-		printf("FOR %s Arr len: %i, min: %f, 25th: %f, avg: %f, 50th: %f, 75th: %f, 90th: %f, 95th: %f, max: %f", s.c_str(), v.size(), v[0], v[len/4], std::accumulate(v.begin(), v.end(),0.0)/(float)len, v[len/2], v[3*len/4], v[9*len/10], v[95*len/100], v[len-1]);
-		if (s.find("Ludo") != string::npos)
-			logs<<s.substr(s.size()-7)<<", "<<std::accumulate(v.begin(), v.end(),0.0)/(float)len<<endl;
-	}
-	else
-		printf("FOR %s Arr len:  IS ZERO!!!", s.c_str());
-	logs.close();
-}
-
-
 template<int VL, class Val>
 void testLudo(vector<Key> &keys, vector<Val> &values, uint64_t nn, vector<Key> &zipfianKeys) {
   // Clocker is being used for logging time: output file has info on when a task starts, ends.
-	Clocker cp_dp_constr("MPC CP+DP construction");
 	Clocker construction("MPC construction");
   
   Clocker cpBuild("CP build");
@@ -393,8 +371,7 @@ void testLudo(vector<Key> &keys, vector<Val> &values, uint64_t nn, vector<Key> &
     cp.insert(keys[i], values[i]);
   }
   cpBuild.stop();
- 
-
+  
   Clocker cpPrepare("CP prepare for DP");
   cp.prepareToExport();
   cpPrepare.stop();
@@ -403,14 +380,8 @@ void testLudo(vector<Key> &keys, vector<Val> &values, uint64_t nn, vector<Key> &
   Clocker exp("MPC export");
   DataPlaneMinimalPerfectCuckoo<Key, Val, VL> dp(cp);
   exp.stop();
-  cp_dp_constr.stop();
   
-  std::cout << "~~~~~In testLudo: VL:" << VL << ", #cores:" << cores << ", lookUp len: " << keys.size() << ", keyValSz: " << nn << ", vals Len:" << values.size() << std::endl;
-  
-  if (VL == 4 || VL == 20 || VL == 32) {
-  Clocker ludoClock("actual_lookup_Ludo_start");
-	  std::cout << "~~~~~In testLudo: VL:" << VL << ", #cores:" << cores << std::endl;
-    cores = 1; // LIMITING ||alism for comparison with ASA.
+  if (VL == 4 || VL == 20) {
     for (int threadCnt = 1; threadCnt <= cores; ++threadCnt) {
       thread threads[threadCnt];
       uint32_t start[threadCnt];
@@ -421,42 +392,27 @@ void testLudo(vector<Key> &keys, vector<Val> &values, uint64_t nn, vector<Key> &
       
       for (Distribution distribution: {uniform, exponential}) {
         ostringstream oss;
-        oss << "MPC parallel lookup " << threadCnt << " threads " << keys.size() << " keys "
+        oss << "MPC parallel lookup " << threadCnt << " threads " << lookupCnt << " keys "
             << (distribution == exponential ? "Zipfian" : "uniform");
+        Clocker plookup(oss.str());
+        
         for (int i = 0; i < threadCnt; ++i) {
-          threads[i] = std::thread([](const DataPlaneMinimalPerfectCuckoo<Key, Val, VL> *dp, const ControlPlaneMinimalPerfectCuckoo<Key, Val, VL> *cp, uint32_t start, const vector<Key> *zipfianKeys, uint32_t lookupCnt, Distribution distr, vector<Val> vals, uint64_t nn1) {
-        // Clocker plookup(oss.str());
-           Clocker plookup(std::string(distr == exponential ? "MPC_Zipfian" : "MPC_uniform"));
-	std::vector<double> per_lookup_times;
-			 
-	     int stupid = 0;
-	    int wrong_Ct =0;
-	    std::cout << "I AM A LUDO-LOOKUP thread. Iterating over keys, start: " << start << std::endl;
+          threads[i] = std::thread([](const DataPlaneMinimalPerfectCuckoo<Key, Val, VL> *dp, uint32_t start,
+                                      const vector<Key> *zipfianKeys, uint32_t lookupCnt) {
+            int stupid = 0;
+            
             int ii = start;
             do {
               const Key &k = zipfianKeys->at(ii);
-              struct timespec start_rt, end_rt;
-	      clock_gettime(CLOCK_REALTIME, &start_rt);
-	      Val val;
-              // dp->lookUp(k, val);
+              Val val;
+              dp->lookUp(k, val);
+              stupid += val;
               
-	        cp->lookUp(k, val);
-		clock_gettime(CLOCK_REALTIME, &end_rt);
-		per_lookup_times.push_back(diff_ns_RT(end_rt,start_rt));	
-
-	      stupid += val;
-	       if ( (distr != exponential) && (val != vals[ii%nn1]) )
-	      	wrong_Ct += 1; 
-	      	// std::cout << "LUDO made an error! val:" << val << ", actual: " << values[ii%nn] << std::endl;
               if (ii == lookupCnt - 1) ii = -1;
               ++ii;
             } while (ii != start);
-            printf("Stupid:%d\b", stupid & 7);
-		plookup.stop();
-		print_arr(per_lookup_times, std::string("LudoLookup: Distrib: ") + std::string(distr == exponential ? "Zipfian" : "uniform"));
-	    	
-		std::cout << "LUDO: done : wrong ct:" << wrong_Ct << " out of " << lookupCnt << std::endl;
-          }, &dp, &cp, start[i], distribution == exponential ? &zipfianKeys : &keys, keys.size(), distribution, values, nn);
+            printf("%d\b", stupid & 7);
+          }, &dp, start[i], distribution == exponential ? &zipfianKeys : &keys, lookupCnt);
         }
         
         for (int i = 0; i < threadCnt; ++i) {
@@ -464,7 +420,6 @@ void testLudo(vector<Key> &keys, vector<Val> &values, uint64_t nn, vector<Key> &
         }
       }
     }
-    ludoClock.stop();
   }
   
   if (VL == 20) {
@@ -692,66 +647,11 @@ void testDPH(vector<Key> &keys, vector<Val> &values, uint64_t nn, vector<Key> &z
   }
 }
 
-void analyse_ASA_timings(std::vector<double>& ht_times, std::vector<double>& bf_times1, std::vector<std::vector<double>>& bf_itimes, std::ofstream& logs)
-{
-	std::cout << "ANALYSING TIMINGs: \n";
-	  printf("#Lookups in HT: %i, #Lookups in BFs: %i", ht_times.size(), bf_times1.size());
-	// analyse timings:
-	  std::vector<double> total_lookup_times (ht_times.begin(), ht_times.end());
-	  print_arr(ht_times, "HT wallTime (ns) :");
-	  for (int i = 0 ; i < bf_times1.size(); i++)
-	  {
-		  double ti = bf_times1[i];
-		  ti += *std::max_element(bf_itimes[i].begin(), bf_itimes[i].end());
-		  if (i % 2900 == 5)
-			  std::cout << "i:" << i << ", lookup1 time: " << bf_times1[i] << ", adding max_bf_lookup:" << ti  << std::endl;
-		  total_lookup_times.push_back(ti);
-	  }
-	  double total_time = std::accumulate(total_lookup_times.begin(), total_lookup_times.end(), 0.0);
-	  std::cout << "TOTAL time (ns) for ASA:" << total_time << " avg per query: " << total_time/total_lookup_times.size() << std::endl;
-	  print_arr(total_lookup_times, "Total lookuptime: "); 
-	  logs << total_time/total_lookup_times.size() << ", ";
-	// clear all arrs:
-	ht_times.clear();
-	bf_times1.clear();
-	bf_itimes.clear();
-}
-
 template<int VL, class Val>
-void testFIB(vector<Key> &keys, vector<Val> &values, uint64_t nn, std::string fname, int fib_model_flag, int fib_mem_flag, vector<Key> &zipfianKeys) {
-  Fib<VL,Val> fib (fib_model_flag, fib_mem_flag);
-  cout<<"Called testFIB, starting population of fib>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"<<endl;;
-  uint64_t memory = 1024*4*8;
-  printf("CALLING populate with nn %i, lookupKeySz: %i, model flag: %i, mem flag: %i", nn, keys.size(), fib_model_flag, fib_mem_flag);
-  Clocker cp_dp_construction("ASA Construction");
-  fib.populate(keys, values, nn); // memory
-  cp_dp_construction.stop();
-  cout<<"Called testFIB, done population of fib>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"<<endl;
+void testFIB(vector<Key> &keys, vector<Val> &values, uint64_t nn, vector<Key> &zipfianKeys) {
+  Fib<Val> fib(8);
+  fib.populate(keys, values, nn, nn/2);
   
-  std::ofstream logs;
-  logs.open("/home/ubuntu/Ludo/FIB_logs/ASA_FIB"+fname+".txt", std::ios::app);
-  for (Distribution distribution: {uniform, exponential})
-  {
-	  Clocker total_fwd_time("ASA FIB: Total Lookup WORKLOAD:" + std::string(distribution == exponential ? "Zipfian" : "uniform") );
-  	  int wrong_count = 0;
-	  std::vector<Key>& lookup_keys = (distribution == exponential ? zipfianKeys : keys);
-	  for (int i = 0; i < lookup_keys.size(); i++)
-	  {
-		  if (i<5)
-			  cout << "k,v:" << lookup_keys[i] << "," << fib.actual_keys_vals[lookup_keys[i]] << std::endl;
-		  Val v = fib.forward(lookup_keys[i]);
-		  if (v != fib.actual_keys_vals[lookup_keys[i]])
-			  wrong_count++;
-	  }
-	  total_fwd_time.stop();
-  
-  	  cout<< "DONE with lookups! Workload-Distr:" << (distribution == exponential ? "Zipfian" : "uniform") << "Wrong Count: "<<wrong_count<<" total lookUp keys: "<<lookup_keys.size() <<", Accuracy score: " << 1.0 - (wrong_count/(float)lookup_keys.size()) <<endl;
-
-	logs << fib_model_flag << ", " << fib_mem_flag << ", " << std::string(distribution == exponential ? "Zipfian" : "uniform") << ", " << (float)(1.0 - (wrong_count/(float)lookup_keys.size())) << ", ";
-          analyse_ASA_timings(fib.ht_lookup_time, fib.bf_lookup1_time, fib.bf_ilookup_times, logs);
-        logs <<fib.total_memory<<endl;
-  }
-  logs.close(); 
 }
 
 
@@ -938,66 +838,12 @@ void testCuckoo(vector<Key> &keys, vector<Val> &values, uint64_t nn, vector<Key>
   }
 }
 
-std::pair< std::vector<Key>, std::vector<uint32_t> > read_fib_json(std::string fpath)
-{
-	
-	std::ifstream file(fpath);
-        Json::Value rawJson;
-        Json::Reader reader;
-
-	reader.parse(file, rawJson);
-	
-	int totalEntries = rawJson.size();
-
-	std::vector<Key> keys;
-	std::vector<uint32_t> values;
-
-	std::cout << "read " << totalEntries << " entries \n";
-
-	int copy_ct = 0;
-	std::unordered_set<Key> unique_keys;
-	for (int entry = 0; entry < totalEntries; ++entry)
-	{
-		Key key  = ( (uint32_t) rawJson[entry]["ip1"].asUInt() * pow(2,24)) + ((uint32_t) rawJson[entry]["ip2"].asUInt() * pow(2,16)) + ((uint32_t) rawJson[entry]["ip3"].asUInt() * pow(2,8)) + ((uint32_t) rawJson[entry]["ip4"].asUInt() * 1);
-		
-		if (unique_keys.find(key) != unique_keys.end())
-			copy_ct += 1;
-			// std::cout << "WEIRD!!! THis key is already there!!! \n";
-		else
-		{
-			unique_keys.insert(key);
-			keys.push_back(( (uint32_t) rawJson[entry]["ip1"].asUInt() * pow(2,24)) + ((uint32_t) rawJson[entry]["ip2"].asUInt() * pow(2,16)) + ((uint32_t) rawJson[entry]["ip3"].asUInt() * pow(2,8)) + ((uint32_t) rawJson[entry]["ip4"].asUInt() * 1));
-			values.push_back((uint32_t) rawJson[entry]["nextHopInt"].asUInt());	
-		}
-		//if (entry%500 == 7)
-		// printf("%i %i %i %i : %i", rawJson[entry]["ip1"], rawJson[entry]["ip2"], rawJson[entry]["ip3"], rawJson[entry]["ip4"], rawJson[entry]["nextHopInt"]);
-	/*	
-	       	std::cout << rawJson[entry]["ip1"] << ", " << rawJson[entry]["ip1"].asUInt() << ", " << (uint32_t) rawJson[entry]["ip1"].asUInt() * pow(2,24)<< ", ip2:" << rawJson[entry]["ip2"] << ", " << rawJson[entry]["ip3"]<< ", " << rawJson[entry]["ip4"]<< ": " << rawJson[entry]["nextHopInt"] << "\n"; 
-		std::cout << rawJson[entry]["ip4"] << ", " << rawJson[entry]["ip4"].asUInt() << ", " << (uint32_t) rawJson[entry]["ip4"].asUInt() * 1 << " | ";
-		std::cout << "FINAL KEY: " << keys[entry] << std::endl; 
-	*/
-	 }
-	 std::cout << "Unique keys:" << unique_keys.size() << std::endl;
-	
-	/* RANDOM FIB data:
-	   std::vector<Key> keys (10000);
-	std::vector<uint32_t> values (10000);
-	for (int i = 0; i < 10000; i++)
-	{
-		keys[i] = i+5;
-		values[i] = i%200; // i%77 + i%90;
-	}
-	*/
-	return std::make_pair(keys, values);
-}
-
-
 template<int VL, class Val>
-void test(std::string fname = "", int fib_model_flag=0, int fib_mem_flag = 0) {
-  for (int repeat = 7; repeat < 8; repeat += 1)
+void test() {
+  for (int repeat = 5; repeat < 6; repeat += 1)
   {
 	  std::cout << "starting repeat = " << repeat << std::endl;
-	 for (uint64_t nn = 32768; nn <= 32769; nn *= 2) // (1U << 30)
+	 for (uint64_t nn = 131072; nn <= 131073; nn *= 2) // (1U << 30)
       try {
         ostringstream oss;
         
@@ -1010,6 +856,7 @@ void test(std::string fname = "", int fib_model_flag=0, int fib_mem_flag = 0) {
         string lastLine, tmp;
         
         while (getline(testLog, tmp)) {
+		std::cout << "reading file " << logName << ", got line " << tmp << std::endl;
           if (tmp.size() && tmp[0] == '|') lastLine = tmp;
         }
         testLog.close();
@@ -1017,7 +864,7 @@ void test(std::string fname = "", int fib_model_flag=0, int fib_mem_flag = 0) {
         if (lastLine.size() >= 3 && lastLine[2] == '-')
 	{
 		printf("Last Line > 3 and [2] = -, %s continuing [thi smeans it wont run test] \n", lastLine.c_str());
-		// continue;
+		continue;
 	}	
         
         TeeOstream tos(logName);
@@ -1025,69 +872,49 @@ void test(std::string fname = "", int fib_model_flag=0, int fib_mem_flag = 0) {
        
        // LFSRGen : seed, max, skip ct inputs.	
         LFSRGen<Key> keyGen(0x1234567801234567ULL, max((uint64_t) lookupCnt, nn), 0);
-        LFSRGen<Val> valueGen(0x1234567887654321ULL, 1000, 0);
+        LFSRGen<Val> valueGen(0x1234567887654321ULL, nn, 0);
         
 	// keys is the array of keys to be looked up: represents workload.
 	// fill the first nn vals by LFSR KeyGen, repeat the rest.
-        // vector<Key> keys(max((uint64_t) lookupCnt, nn));
-        // vector<Val> values(nn);
+        vector<Key> keys(max((uint64_t) lookupCnt, nn));
+        vector<Val> values(nn);
         
-        /*
-	for (uint64_t i = 0; i < nn; i++) {
+        for (uint64_t i = 0; i < nn; i++) {
           keyGen.gen(&keys[i]);
           Val v;
           valueGen.gen(&v);
-	  // std::cout << "key:" << keys[i] << ", valuegen generated: " << v << " || ";
-          values[i] = v & (uint(-1) >> (32 - VL)); // emptying out 32-VL bits
-	  // std::cout << "val[" << i << "]: " << values[i] << std::endl;
-	}
-	*/
-
-	std::pair< std::vector<Key>, std::vector<uint32_t> > keys_vals = read_fib_json("../../cisco_data/" + fname + ".json");
-	uint64_t new_nn = keys_vals.first.size();
-	uint64_t new_lookupCnt = 8 * new_nn;
-
-	uint64_t ludo_space = (3.76 + 1.05*VL) * new_nn;
-	std::cout << "FOR router" << fname << " ludo space:" << ludo_space << std::endl;
-
-	vector<Key> keys(max((uint64_t) new_lookupCnt, new_nn));
-	vector<Val> values( keys_vals.second.begin(), keys_vals.second.end() );
-	
+          values[i] = v & (uint(-1) >> (32 - VL));
+        }
+        
 	// Uniformly distributed keys: [each key occurs lookupCnt/nn times]
-        for (uint64_t i = 0; i < max((uint64_t) new_lookupCnt, new_nn); i++) {
-          	keys[i] = keys_vals.first[i%new_nn];
-		// keys[i] = keys[i % nn];
+        for (uint64_t i = nn; i < max((uint64_t) lookupCnt, nn); i++) {
+          keys[i] = keys[i % nn];
         }
         
         vector<Key> zipfianKeys;
-        zipfianKeys.reserve(new_lookupCnt);
+        zipfianKeys.reserve(lookupCnt);
         
+	// fill zipfian keys vec [of keys to be looked up] based on zipfian.
+        for (int i = 0; i < lookupCnt; ++i) {
           InputBase::distribution = exponential;
-          InputBase::bound = new_nn;
+          InputBase::bound = nn;
+          
           uint seed = Hasher32<string>()(logName);
           InputBase::setSeed(seed);
-	  
-	  vector<uint32_t> per_ind_count (new_nn);
-
-	  // fill zipfian keys vec [of keys to be looked up] based on zipfian.
-          for (int i = 0; i < new_lookupCnt; ++i) {
-          	uint32_t idx = InputBase::rand();
-          	// std::cout << "seed: "<< seed << ": pushing idx" << idx << ", ";
-	  	zipfianKeys.push_back(keys_vals.first[idx]);
-		per_ind_count[idx] += 1;
-          }
-	  // for (int i = 0; i < new_nn; i++)
-		  // std::cout << "Ct for i=" << i << " is " << per_ind_count[i] << "\n";
+          
+          uint32_t idx = InputBase::rand();
+          zipfianKeys.push_back(keys[idx]);
+        }
   
         // if (nn < 268435456)
-          // testSetSep<VL, Val>(keys, values, nn, zipfianKeys);
-	  fname_global = fname;
-  	  testFIB<VL, Val>(keys,values, new_nn, fname, fib_model_flag, fib_mem_flag, zipfianKeys);
+           testSetSep<VL, Val>(keys, values, nn, zipfianKeys);
+  	  //testFIB<VL, Val>(keys, values, nn, zipfianKeys);
 //        testCuckoo<VL, Val>(keys, values, nn, zipfianKeys);
+
 //        testOthello<VL, Val>(keys, values, nn, zipfianKeys);
-        
-	  try {
-            testLudo<VL, Val>(keys,values, new_nn, zipfianKeys);
+//
+        try {
+          // testLudo<VL, Val>(keys, values, nn, zipfianKeys);
         } catch (exception &e) {
           cout << e.what() << endl;
           break;
@@ -1113,7 +940,7 @@ void test(std::string fname = "", int fib_model_flag=0, int fib_mem_flag = 0) {
 
 // returns opt fpr's
 template<int VL, class Val>
-std::pair<std::unordered_map<Val, double>, double> get_opt_bf_sizes(vector<Key> &keys, vector<Val> &values, uint64_t nn, uint64_t memory, bool is_hh_bf)
+std::pair<std::unordered_map<Val, double>, double> get_opt_bf_sizes(vector<Key> &keys, vector<Val> &values, uint64_t nn, uint64_t memory)
 {
 	// find #keys for each value, find HOT keys
 	std::map<Val, uint64_t> per_val_key_ct;
@@ -1141,94 +968,80 @@ std::pair<std::unordered_map<Val, double>, double> get_opt_bf_sizes(vector<Key> 
 		n_sum += per_val_key_ct[hv];
 		std::cout << "val:" << hv << " sz:" << per_val_key_ct[hv] << "nln sum: " << nln_sum << ", nsum: " << n_sum << std::endl;
 	}
-	// if there's BFh at the top:
-	double w_h = 1.0;
-	if (is_hh_bf)
-	{
-		// Give less wt to fh, since Sh is bigger than Si's.
-		w_h = 1.0/hawt_vals.size(); // 0.020833;
-		nln_sum += total_hh_keys * log(total_hh_keys / w_h);
-		n_sum += total_hh_keys;
-		std::cout << "After adding HH-BF: nln sum: " << nln_sum << ", nsum: " << n_sum << std::endl;
-	}	
-	
+	// if there's BFh at the top: [TODO: add input bool]
+	// Give less wt to fh, since Sh is bigger than Si's.
+	double w_h = 0.020833;
+	nln_sum += total_hh_keys * log(total_hh_keys / w_h);
+	n_sum += total_hh_keys;
+	std::cout << "nln sum: " << nln_sum << ", nsum: " << n_sum << std::endl;
+
 	// double lambda = log( (memory*log(2)*log(2) + nln_sum) / n_sum );
 	// std::cout << "lambda: " << lambda << std::endl;
 	double muu = exp( -1.0 * (memory + nln_sum) / n_sum );
 	std::cout << "muu: " << muu << std::endl;
 
-	int total_iters = 0; // for logging
-	bool some_fpr_invalid = true; // loop exit condn
-	std::unordered_map<Val, double> fpr_iter; // current set of fprs for val
-	std::unordered_set<Val> remaining_vals = hawt_vals; // which vals have a BF
-	for (auto &hv: hawt_vals)
-		fpr_iter[hv] = (per_val_key_ct[hv] * muu);
-	double hh_fpr_iter =  (total_hh_keys * muu / w_h);
-	bool remaining_hh_bf = (is_hh_bf);
-
-	while (some_fpr_invalid)
-	{
-		// are some fi's > 1? collect nln,n terms.
-		int curr_sz = remaining_vals.size() + remaining_hh_bf; 
-		for (auto &hv: remaining_vals)
-			if (fpr_iter[hv] > 1.0)
-				remaining_vals.erase(hv);
-
-		if (remaining_hh_bf && hh_fpr_iter > 1.0 )
-			remaining_hh_bf = false;
-
-		// re-solve:
-		if ( (remaining_vals.size() + remaining_hh_bf) == curr_sz)
-			some_fpr_invalid = false;
-		else
-		{
-			std::cout << "NOW " << remaining_vals.size() << " remaining keys! HH-BF?" << remaining_hh_bf << std::endl;
-			double nln_sum_i = (remaining_hh_bf) ? total_hh_keys*log(total_hh_keys) : 0.0;
-			double n_sum_i = (remaining_hh_bf) ? total_hh_keys : 0.0;
-			for (auto &hv: remaining_vals)
-			{
-				nln_sum_i += per_val_key_ct[hv] * log(per_val_key_ct[hv]);
-				n_sum_i += per_val_key_ct[hv];
-			}
-
-			muu = exp( -1.0 * (memory + nln_sum_i) / (n_sum_i) );
-			for (auto &hv: remaining_vals)
-				fpr_iter[hv] = muu * per_val_key_ct[hv];
-			hh_fpr_iter = remaining_hh_bf ? (muu * total_hh_keys)/w_h : -1.0;
-		}
-
-	}
-
 	std::unordered_map<Val, double> per_bf_fpr;
-	for (auto &hv: remaining_vals)
+	for (auto &hv: hawt_vals)
 	{
-		per_bf_fpr[hv] = fpr_iter[hv];
+		// per_bf_fpr[hv] = pow(0.5, (lambda-log(per_val_key_ct[hv]))/log(2) );
+		per_bf_fpr[hv] = per_val_key_ct[hv] * muu;
 		std::cout << "For val=" << hv << " BF fpr: " << per_bf_fpr[hv] << std::endl;
 	}
-	std::cout << hh_fpr_iter << " : HH FPR" << std::endl;
-	return std::make_pair(per_bf_fpr, hh_fpr_iter); // pow(0.5, (lambda - log(total_hh_keys) )/log(2) ) 
+	return std::make_pair(per_bf_fpr, (muu * total_hh_keys)/w_h); // pow(0.5, (lambda - log(total_hh_keys) )/log(2) ) 
+}
+
+std::pair< std::vector<Key>, std::vector<uint32_t> > read_fib_json(std::string fpath)
+{
+	/*
+	std::ifstream file(fpath);
+        Json::Value rawJson;
+        Json::Reader reader;
+
+	reader.parse(file, rawJson);
+	
+	int totalEntries = rawJson.size();
+
+	std::vector<Key> keys (totalEntries);
+	std::vector<uint32_t> values (totalEntries);
+
+	for (int entry = 0; entry < totalEntries; ++entry)
+	{
+		keys[entry] = ( (uint8_t) rawJson[entry]["ip1"].asInt() * pow(2,24)) + ((uint8_t) rawJson[entry]["ip1"].asInt() * pow(2,16)) + ((uint8_t) rawJson[entry]["ip1"].asInt() * pow(2,8)) + ((uint8_t) rawJson[entry]["ip1"].asInt() * 1);
+		values[entry] = (uint32_t) rawJson[entry]["nextHopInt"].asInt();
+		
+		if (entry%500 == 7)
+			std::cout << keys[entry] << ": " << values[entry] << "\n"; 
+	}
+	*/
+	std::vector<Key> keys (10000);
+	std::vector<uint32_t> values (10000);
+	for (int i = 0; i < 10000; i++)
+	{
+		keys[i] = i+5;
+		values[i] = i%27 + i%70;
+	}
+	return std::make_pair(keys, values);
 }
 
 int main(int argc, char **argv) {
   commonInit();
 
 	// some key, values to test get_opt_bf_sizes  
-	string fname = "../../cisco_data/" + string(argv[1]) + ".json";
-	// std::pair< std::vector<Key>, std::vector<uint32_t> > keys_vals = read_fib_json(fname);
-	// get_opt_bf_sizes<32,uint32_t>(keys_vals.first, keys_vals.second, keys_vals.first.size(), 1024*16, false);	
+	string fname = "../cisco_data/" + string(argv[1]) + ".json";
+	std::pair< std::vector<Key>, std::vector<uint32_t> > keys_vals = read_fib_json(fname);
+	get_opt_bf_sizes<32,uint32_t>(keys_vals.first, keys_vals.second, keys_vals.first.size(), 1024*16);	
 	
-	for (int i = 0; i < 1; ++i) test<32, uint32_t>(string(argv[1]), std::stoi(argv[2]), std::stoi(argv[3]));
   if (argc == 1) {
     	printf("STARTING expt value sz = 4 \n");
+	for (int i = 0; i < 1; ++i) test<4, uint8_t>();
     // for (int i = 0; i < 100; ++i) test<8, uint8_t>();
     // for (int i = 0; i < 100; ++i) test<12, uint16_t>();
     // for (int i = 0; i < 100; ++i) test<16, uint16_t>();
     // for (int i = 0; i < 100; ++i) test<20, uint32_t>();
-   // test<32>();
+//    test<32>();
   	return 0;
   }
- 
- /* 
+  
   switch (atoi(argv[1])) {
     case 4:
       for (int i = 0; i < 100; ++i) test<4, uint8_t>();
@@ -1250,7 +1063,6 @@ int main(int argc, char **argv) {
 //    case 32:
 //      test<32>();
   }
-  */
   
   return 0;
 }

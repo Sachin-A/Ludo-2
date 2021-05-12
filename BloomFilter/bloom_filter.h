@@ -5,6 +5,7 @@
 
 #pragma once
 
+// 2^L is the max count this BF can store for any key.
 template<class Key, int L = 1>
 class BloomFilter {
   static_assert(
@@ -100,12 +101,13 @@ public:
         k = (int) round(log(2.0) * m / capacity);
       } while (tmpK != k || tmpM != m);
     } else {
-      k = numberOfHashes;
-      m = static_cast<uint32_t>(capacity * k / -log(1 - pow(FP, 1.0 / k)));
+	k = numberOfHashes;
+        m = static_cast<uint32_t>(capacity * k / -log(1 - pow(FP, 1.0 / k)));
+        std::cout << "input #hashes:" << numberOfHashes << std::endl; 
     }
     
     double fp = pow(1 - exp(-1.0 * k * capacity / m), k);
-//    cout << "decided m, K, fp: " << m << ", " << K << ", " << fp << endl;
+    cout << "decided m, K, fp: " << m << ", " << k << ", " << fp << ", capacity: " << capacity << endl;
     
     mem.resize(((uint64_t) m * L + 63) / 64);
     
